@@ -1,8 +1,67 @@
 node dialogue_root;
 
 node dialogue_state {
-    has name;
-    has response;
+    can bi_enc.infer;
+    can tfm_ner.extract_entity;
+
+    can classify_intent {
+        intent_labels = -[intent_transition]->.edge.intent;
+        visitor.wlk_ctx["intent"] = bi_enc.infer(
+            contexts = [visitor.question],
+            candidates = intent_labels,
+            context_type = "text",
+            candidate_type = "text"
+        )[0]["predicted"]["label"];
+    }
+
+    can extract_entities {
+        res = tfm_ner.extract_entity(visitor.question);
+        for ent in res {
+            ent_type = ent["entity_value"];
+            ent_text = ent["entity_text"];
+            if (!(ent_type in visitor.wlk_ctx["entities"])){
+                visitor.wlk_ctx["entities"][ent_type] = [];
+            }
+            visitor.wlk_ctx["entities"][ent_type].l::append(ent_text);
+        }
+    }
+
+    can init_wlk_ctx {
+        new_wlk_ctx = {
+            "intent": null,
+            "entities": {},
+            "prev_state": null,
+            "next_state": null,
+            "respond": false
+        };
+        if ("entities" in visitor.wlk_ctx) {
+            // Carry over extracted entities from previous interaction
+            new_wlk_ctx["entities"] = visitor.wlk_ctx["entities"];
+        }
+        visitor.wlk_ctx = new_wlk_ctx;
+    }
+    can nlu {}
+    can process {
+        if (visitor.wlk_ctx["prev_state"]): visitor.wlk_ctx["respond"] = true;
+        else {
+            visitor.wlk_ctx["next_state"] = net.root();
+            visitor.wlk_ctx["prev_state"] = here;
+        }
+    }
+    can nlg {}
+}
+
+node dialogue_root:dialogue_state {
+    has name = "dialogue_root";
+    can nlu {
+        ::classify_intent;
+    }
+    can process {
+        visitor.wlk_ctx["next_state"] = (-[intent_transition(intent==visitor.wlk_ctx["intent"])]->)[0];
+    }
+    can nlg {
+        visitor.response = "Sorry I can't handle that just yet. Anything else I can help you with?";
+    }
 }
 
 edge intent_transition {
@@ -44,23 +103,26 @@ walker init {
 
 walker talk {
     has question;
-    can bi_enc.infer;
+    has wlk_ctx = {};
+    has response;
     root {
-        question = std.input("> ");
         take --> node::dialogue_root;
     }
-    dialogue_root {
-        intent_labels = -[intent_transition]->.edge.intent;
-        predicted_intent = bi_enc.infer(
-            contexts = [question],
-            candidates = intent_labels,
-            context_type = "text",
-            candidate_type = "text"
-        )[0]["predicted"]["label"];
-        take -[intent_transition(intent==predicted_intent)]-> node::dialogue_state;
-    }
     dialogue_state {
-        std.out(here.response);
+        if (!question) {
+            question = std.input("Question (Ctrl-C to exit)> ");
+            here::init_wlk_ctx;
+        }
+        here::nlu;
+        here::process;
+        if (visitor.wlk_ctx["respond"]) {
+            here::nlg;
+            std.out(response);
+            question = null;
+            take here;
+        } else {
+            take visitor.wlk_ctx["next_state"] else: take here;
+        }
     }
 }
 
