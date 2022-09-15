@@ -26,3 +26,24 @@ graph dialogue_system {
         dialogue_root -[intent_transition(intent="order a tesla")]-> how_to_order_state;
     }
 }
+
+walker init {
+    root {
+        spawn here --> graph::dialogue_system;
+        spawn here walker::talk;
+    }
+}
+
+walker talk {
+    has question;
+    root {
+        question = std.input("> ");
+        take --> node::dialogue_root;
+    }
+    dialogue_root {
+        take -[intent_transition(intent==question)]-> node::dialogue_state;
+    }
+    dialogue_state {
+        std.out(here.response);
+    }
+}
