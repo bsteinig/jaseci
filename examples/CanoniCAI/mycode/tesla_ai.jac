@@ -72,7 +72,7 @@ edge entity_transition {
     has entities;
 }
 
-graph dialogue_system {
+graph tesla_ai {
     has anchor dialogue_root;
     spawn {
         dialogue_root = spawn node::dialogue_root;
